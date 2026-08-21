@@ -158,7 +158,7 @@ async function enterRoom(id, name, avatar) {
 
     if (!media.micTrack) {
       try {
-        await withTimeout(media.initMic(), 10000, 'Tempo esgotado ao acessar o microfone.');
+        await withTimeout(media.initMic(), 15000, 'Tempo esgotado ao acessar o microfone.');
       } catch (err) {
         throw new Error(err.message.includes('Tempo esgotado')
           ? 'O navegador demorou demais para responder sobre o microfone. Recarregue a página e tente de novo.'
@@ -168,7 +168,7 @@ async function enterRoom(id, name, avatar) {
 
     signaling = new SignalingClient();
     try {
-      await withTimeout(signaling.connect(), 10000, 'Tempo esgotado ao conectar ao servidor.');
+      await withTimeout(signaling.connect(), 15000, 'Tempo esgotado ao conectar ao servidor.');
     } catch (err) {
       throw new Error('Não foi possível conectar ao servidor. Verifique sua internet e tente novamente.');
     }
@@ -176,7 +176,7 @@ async function enterRoom(id, name, avatar) {
 
     const joinRes = await withTimeout(
       signaling.joinRoom({ roomId: id, name, avatar }),
-      10000,
+      20000,
       'Tempo esgotado ao entrar na sala.'
     );
 
