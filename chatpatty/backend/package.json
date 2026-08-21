@@ -1,5 +1,5 @@
 {
-  "name": "chatpatty-server",
+  "name": "chatpatty-backend",
   "version": "1.0.0",
   "description": "ChatPatty - chat de voz em tempo real com compartilhamento de tela (WebRTC + Socket.IO)",
   "main": "server.js",
