@@ -25,7 +25,7 @@ export class SignalingClient extends Emitter {
         reconnectionAttempts: Infinity,
         reconnectionDelay: 800,
         reconnectionDelayMax: 5000,
-        timeout: 10000,
+        timeout: 20000,
       });
 
       const onConnect = () => {
@@ -64,7 +64,12 @@ export class SignalingClient extends Emitter {
   joinRoom({ roomId, name, avatar }) {
     return new Promise((resolve, reject) => {
       this.socket.emit('join-room', { roomId, name, avatar }, (res) => {
-        if (!res?.ok) return reject(new Error(res?.error || 'Falha ao entrar na sala'));
+        if (!res) {
+          return reject(new Error('Servidor não respondeu ao tentar entrar na sala'));
+        }
+        if (!res?.ok) {
+          return reject(new Error(res?.error || 'Falha ao entrar na sala'));
+        }
         this.selfId = res.selfId;
         resolve(res);
       });
