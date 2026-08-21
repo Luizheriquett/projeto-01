@@ -224,7 +224,7 @@ const io = new Server(server, {
     credentials: true,
   },
   maxHttpBufferSize: 64 * 1024, // payloads de sinalização são pequenos
-  pingTimeout: 20000,
+  pingTimeout: 60000,
   pingInterval: 10000,
 });
 
