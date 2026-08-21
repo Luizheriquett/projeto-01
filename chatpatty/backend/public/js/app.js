@@ -66,8 +66,8 @@ let mediaEventsBound = false;
 /** @type {Map<string, {id:string,name:string,avatar:string,muted:boolean,speaking:boolean,sharingScreen:boolean}>} */
 const participants = new Map();
 
-let activeShareId = null; // quem está com a tela em destaque no palco
-const shareVideoTracks = new Map(); // peerId -> MediaStreamTrack (video)
+let activeShareId = null;
+const shareVideoTracks = new Map();
 
 // ---------------------------------------------------------------------------
 // Lobby
@@ -79,6 +79,14 @@ function currentPathRoomId() {
   return m ? m[1] : null;
 }
 
+/** Evita que qualquer etapa (mic, conexão, entrada na sala) trave para sempre. */
+function withTimeout(promise, ms, message) {
+  return Promise.race([
+    promise,
+    new Promise((_, reject) => setTimeout(() => reject(new Error(message)), ms)),
+  ]);
+}
+
 function setLobbyError(msg) {
   lobbyError.textContent = msg || '';
 }
@@ -88,6 +96,8 @@ btnCreateRoom.addEventListener('click', async () => {
   const name = inputName.value.trim();
   if (!name) return setLobbyError('Digite um nome para continuar.');
   btnCreateRoom.disabled = true;
+  const originalLabel = btnCreateRoom.querySelector('span').textContent;
+  btnCreateRoom.querySelector('span').textContent = 'Conectando…';
   try {
     const res = await fetch('/api/rooms', { method: 'POST' });
     if (!res.ok) throw new Error();
@@ -98,6 +108,7 @@ btnCreateRoom.addEventListener('click', async () => {
     setLobbyError(err?.message || 'Não foi possível criar a sala. Tente novamente.');
   } finally {
     btnCreateRoom.disabled = false;
+    btnCreateRoom.querySelector('span').textContent = originalLabel;
   }
 });
 
@@ -125,7 +136,6 @@ inputName.addEventListener('keydown', (e) => {
   else if (e.key === 'Enter') btnCreateRoom.click();
 });
 
-// Se a URL já aponta para uma sala, pré-preenche o código
 const prefillRoomId = currentPathRoomId();
 if (prefillRoomId) inputRoomCode.value = prefillRoomId;
 
@@ -133,9 +143,6 @@ if (prefillRoomId) inputRoomCode.value = prefillRoomId;
 // Entrar na sala
 // ---------------------------------------------------------------------------
 async function enterRoom(id, name, avatar) {
-  // Evita que cliques repetidos (ou uma tentativa lenta ainda em curso)
-  // disparem múltiplas conexões simultâneas — essa acumulação era a causa
-  // dos eventos e toasts duplicados, e de o app ficar preso na tela inicial.
   if (isEnteringRoom) return;
   isEnteringRoom = true;
 
@@ -144,8 +151,6 @@ async function enterRoom(id, name, avatar) {
     selfAvatar = avatar;
     roomId = id;
 
-    // Se restou uma conexão de uma tentativa anterior mal-sucedida, encerra
-    // antes de abrir outra.
     if (signaling) {
       signaling.leaveRoom();
       signaling.disconnect();
@@ -153,28 +158,33 @@ async function enterRoom(id, name, avatar) {
 
     if (!media.micTrack) {
       try {
-        await media.initMic();
+        await withTimeout(media.initMic(), 10000, 'Tempo esgotado ao acessar o microfone.');
       } catch (err) {
-        throw new Error('Não foi possível acessar o microfone. Verifique as permissões do navegador.');
+        throw new Error(err.message.includes('Tempo esgotado')
+          ? 'O navegador demorou demais para responder sobre o microfone. Recarregue a página e tente de novo.'
+          : 'Não foi possível acessar o microfone. Verifique as permissões do navegador.');
       }
     }
 
     signaling = new SignalingClient();
     try {
-      await signaling.connect();
+      await withTimeout(signaling.connect(), 10000, 'Tempo esgotado ao conectar ao servidor.');
     } catch (err) {
       throw new Error('Não foi possível conectar ao servidor. Verifique sua internet e tente novamente.');
     }
     wireSignalingEvents();
 
-    const joinRes = await signaling.joinRoom({ roomId: id, name, avatar });
+    const joinRes = await withTimeout(
+      signaling.joinRoom({ roomId: id, name, avatar }),
+      10000,
+      'Tempo esgotado ao entrar na sala.'
+    );
 
     window.history.pushState({}, '', `/room/${id}`);
 
     webrtc = new WebRTCManager(signaling, joinRes.selfId, joinRes.iceServers);
     wireWebrtcEvents();
 
-    // registra a si mesmo e os usuários que já estavam na sala
     participants.set(joinRes.selfId, {
       id: joinRes.selfId,
       name,
@@ -284,9 +294,6 @@ function updateParticipant(id, patch) {
   renderAll();
 }
 
-// ---------------------------------------------------------------------------
-// Renderização
-// ---------------------------------------------------------------------------
 function renderAll() {
   UI.renderParticipants(participantsList, participantsCount, participants, webrtc?.selfId, (peerId, vol) =>
     media.setRemoteVolume(peerId, vol)
@@ -317,9 +324,6 @@ function clearScreenShareView() {
   renderAll();
 }
 
-// ---------------------------------------------------------------------------
-// Controles: microfone
-// ---------------------------------------------------------------------------
 btnMic.addEventListener('click', () => {
   const next = !media.isMicEnabled();
   media.setMicEnabled(next);
@@ -330,9 +334,6 @@ btnMic.addEventListener('click', () => {
   if (!next) vad.emit('change', false);
 });
 
-// ---------------------------------------------------------------------------
-// Controles: compartilhar tela
-// ---------------------------------------------------------------------------
 btnScreenShare.addEventListener('click', async () => {
   if (media.isSharingScreen()) {
     stopScreenShare();
@@ -368,9 +369,6 @@ function stopScreenShare() {
   UI.showToast(toastContainer, 'Compartilhamento de tela encerrado');
 }
 
-// ---------------------------------------------------------------------------
-// Adaptação automática de qualidade (bitrate/resolução conforme a rede)
-// ---------------------------------------------------------------------------
 let adaptiveQualityIntervalId = null;
 
 function startAdaptiveQualityLoop() {
@@ -402,9 +400,6 @@ function startAdaptiveQualityLoop() {
   }, 2000);
 }
 
-// ---------------------------------------------------------------------------
-// Dispositivos (microfone / saída / qualidade / fps)
-// ---------------------------------------------------------------------------
 async function populateDevicePickers() {
   const { mics, speakers } = await media.listDevices();
   selectMic.innerHTML = mics
@@ -439,9 +434,6 @@ document.addEventListener('click', (e) => {
   }
 });
 
-// ---------------------------------------------------------------------------
-// Painel de participantes (mobile)
-// ---------------------------------------------------------------------------
 function openParticipants() {
   participantsPanel.dataset.open = 'true';
   participantsScrim.dataset.open = 'true';
@@ -454,9 +446,6 @@ btnToggleParticipants.addEventListener('click', openParticipants);
 btnCloseParticipants.addEventListener('click', closeParticipants);
 participantsScrim.addEventListener('click', closeParticipants);
 
-// ---------------------------------------------------------------------------
-// Diversos: copiar link, tela cheia, sair
-// ---------------------------------------------------------------------------
 btnCopyLink.addEventListener('click', async () => {
   const url = `${window.location.origin}/room/${roomId}`;
   try {
@@ -506,7 +495,6 @@ function cleanupAndReturnToLobby() {
   btnScreenShare.dataset.active = 'false';
 }
 
-// Auto-entrar se a URL já apontar pra uma sala e o nome já tiver sido usado antes nesta aba
 if (prefillRoomId) {
   inputRoomCode.value = prefillRoomId;
   inputName.focus();
